@@ -1,4 +1,4 @@
-Remedios The Beauty Avionics Package
+Remedios The Beauty
 =================
 
 Data capturing avionics for the near-space balloon mission series, "Remedios The Beauty"
