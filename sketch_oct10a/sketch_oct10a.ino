@@ -9,16 +9,23 @@
 
 #include <Adafruit_GPS.h>
 #include <SoftwareSerial.h>
+#include <Wire.h>
+#include <Adafruit_BMP085.h>
+#include <Adafruit_Sensor.h>
 
 
 // Assign the GPS chip its tx and rx pins. (tx,rx)
 SoftwareSerial gpsSerial(3, 2);
 Adafruit_GPS GPS(&gpsSerial);
 
+
+// Initialize the Barometer Sensor
+Adafruit_BMP085 bmp;
+
  
 // Set GPSECHO to 'false' to turn off echoing the GPS data to the Serial console
 // Set to 'true' if you want to debug and listen to the raw GPS sentences. 
-#define GPSECHO  true
+#define GPSECHO  false
 
 
 // this keeps track of whether we're using the interrupt
@@ -33,6 +40,16 @@ void setup()
   // connect at 115200 so we can read the GPS fast enough and echo without dropping chars
   // also spit it out
   Serial.begin(115200);
+  
+  
+  if(!bmp.begin())
+  {
+    /* There was a problem detecting the BMP085 ... check your connections */
+    Serial.print("Ooops, no BMP085 detected ... Check your wiring or I2C ADDR!");
+    while(1);
+  }  
+  
+  
   Serial.println("Adafruit GPS library basic test!");
 
   // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
@@ -118,7 +135,7 @@ void loop()                     // run over and over again
   if (timer > millis())  timer = millis();
 
   // approximately every 2 seconds or so, print out the current stats
-  if (millis() - timer > 2000) { 
+  if (millis() - timer > 5000) { 
     timer = millis(); // reset the timer
     
     Serial.print("\nTime: ");
@@ -131,7 +148,31 @@ void loop()                     // run over and over again
     Serial.print(GPS.month, DEC); Serial.print("/20");
     Serial.println(GPS.year, DEC);
     Serial.print("Fix: "); Serial.print((int)GPS.fix);
-    Serial.print(" quality: "); Serial.println((int)GPS.fixquality); 
+    Serial.print(" quality: "); Serial.println((int)GPS.fixquality);
+   
+    // Data from the Barometric sensor
+    Serial.print("Temperature = ");
+    Serial.print(bmp.readTemperature());
+    Serial.println(" *C");
+    
+    Serial.print("Pressure = ");
+    Serial.print(bmp.readPressure());
+    Serial.println(" Pa");
+    
+    // Calculate altitude assuming 'standard' barometric
+    // pressure of 1013.25 millibar = 101325 Pascal
+    Serial.print("Altitude = ");
+    Serial.print(bmp.readAltitude());
+    Serial.println(" meters");
+
+    // you can get a more precise measurement of altitude
+    // if you know the current sea level pressure which will
+    // vary with weather and such. If it is 1015 millibars
+    // that is equal to 101500 Pascals.
+    Serial.print("Real altitude = ");
+    Serial.print(bmp.readAltitude(101500));
+    Serial.println(" meters");  
+    
     if (GPS.fix) {
       Serial.print("Location: ");
       Serial.print(GPS.latitude, 4); Serial.print(GPS.lat);
@@ -140,8 +181,10 @@ void loop()                     // run over and over again
       
       Serial.print("Speed (knots): "); Serial.println(GPS.speed);
       Serial.print("Angle: "); Serial.println(GPS.angle);
-      Serial.print("Altitude: "); Serial.println(GPS.altitude);
+      Serial.print("GPS Altitude: "); Serial.println(GPS.altitude);
       Serial.print("Satellites: "); Serial.println((int)GPS.satellites);
     }
+    
+   
   }
 }
