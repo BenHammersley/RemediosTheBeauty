@@ -1,5 +1,7 @@
 // Remedios The Beauty
 
+
+// Load the necessary libraries
 #include <Wire.h>
 #include <SoftwareSerial.h>
 #include <Adafruit_GPS.h>
@@ -7,11 +9,32 @@
 #include <Adafruit_Sensor.h>
 
 
+
+
+//////// Initialise the subsystems
+
+////// GPS SYSTEM
+
 // Assign the GPS chip its tx and rx pins. (tx,rx)
 SoftwareSerial gpsSerial(3, 2);
 Adafruit_GPS GPS(&gpsSerial);
+// Set GPSECHO to 'false' to turn off echoing the GPS data to the Serial console
+// Set to 'true' if you want to debug and listen to the raw GPS sentences. 
+#define GPSECHO  false
+// this keeps track of whether we're using the interrupt
+// off by default!
+boolean usingInterrupt = false;
+void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
+
+//////
 
 
+
+
+
+
+
+////// COLOR SENSOR SYSTEM
 // Initialize the Color Sensor
 // ADJD-S311's I2C address, don't change
 #define ADJD_S311_ADDRESS 0x74
@@ -59,40 +82,58 @@ unsigned int colorInt[4] = {2048, 2048, 2048, 2048};  // max value for these is 
 unsigned int colorData[4];  // This is where we store the RGB and C data values
 signed char colorOffset[4];  // Stores RGB and C offset values
 
+//////
 
-//////////
+
+
+
+
+
+////// ATMOSPHERIC SENSOR SYSTEM
 // Initialize the Barometer Sensor
 Adafruit_BMP085 bmp;
 
  
-// Set GPSECHO to 'false' to turn off echoing the GPS data to the Serial console
-// Set to 'true' if you want to debug and listen to the raw GPS sentences. 
-#define GPSECHO  false
 
-
-// this keeps track of whether we're using the interrupt
-// off by default!
-boolean usingInterrupt = false;
-void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
 
 
 void setup()  
 {
   
-  // For the color sensor
-  pinMode(ledPin, OUTPUT);  // Set the sensor's LED as output
-  digitalWrite(ledPin, LOW);  // Initially turn LED light source on
+Wire.begin();
+Serial.begin(115200);
 
+delay(1);  // Wait for ADJD reset sequence on the Color Sensor, Give time to the other boards
+
+
+
+// For the color sensor
+pinMode(ledPin, OUTPUT);  // Set the sensor's LED as output
+digitalWrite(ledPin, LOW);  // Initially turn LED light source on
+
+
+
+
+
+
+
+
+////// First we test the systems
+
+// Initialise the Atmospheric System
+if(!bmp.begin())
+  {
+    /* There was a problem detecting the BMP085 ... check your connections */
+    Serial.print("Atmospheric Sensor System: FAIL");
+    while(1);
+  }  else {
+	Serial.print("Atmospheric Sensor System: OK");
+  }
   
-  // For the GPS 
-  // connect at 115200 so we can read the GPS fast enough and echo without dropping chars
-  // also spit it out
-  Serial.begin(115200);
-  
-  
-  Wire.begin();
-  delay(1);  // Wait for ADJD reset sequence
-  
+
+// Initialise the Color System
+
+
   initADJD_S311();  // Initialize the ADJD-S311, sets up cap and int registers
   
   /* First we'll see the initial values
@@ -117,42 +158,19 @@ void setup()
   Serial.println("\nPress SPACE to read, \"c\" to calibrate, \"o\" to get offset, \"l\" to go to LED mode");
   
   
-  if(!bmp.begin())
-  {
-    /* There was a problem detecting the BMP085 ... check your connections */
-    Serial.print("Ooops, no BMP085 detected ... Check your wiring or I2C ADDR!");
-    while(1);
-  }  
   
-  
-  Serial.println("Adafruit GPS library basic test!");
 
+  
   // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
   GPS.begin(9600);
-  
-  // uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
-  // uncomment this line to turn on only the "minimum recommended" data
-  //GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
-  // For parsing data, we don't suggest using anything but either RMC only or RMC+GGA since
-  // the parser doesn't care about other sentences at this time
-  
   // Set the update rate
   GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);   // 1 Hz update rate
-  // For the parsing code to work nicely and have time to sort thru the data, and
-  // print it out we don't suggest using anything higher than 1 Hz
 
   // Request updates on antenna status, comment out to keep quiet
   GPS.sendCommand(PGCMD_ANTENNA);
-
-  // the nice thing about this code is you can have a timer0 interrupt go off
-  // every 1 millisecond, and read data from the GPS for you. that makes the
-  // loop code a heck of a lot easier!
   useInterrupt(true);
-
   delay(1000);
-  // Ask for firmware version
-  gpsSerial.println(PMTK_Q_RELEASE);
 }
 
 
