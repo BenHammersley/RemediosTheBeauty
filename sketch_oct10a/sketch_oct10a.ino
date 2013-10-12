@@ -136,30 +136,9 @@ if(!bmp.begin())
 
   initADJD_S311();  // Initialize the ADJD-S311, sets up cap and int registers
   
-  /* First we'll see the initial values
-  getRGBC();  // Call this to put new RGB and C values into the colorData array
-  printADJD_S311Values();  // Formats and prints all important registers of ADJD-S311
-  */
-  
-  Serial.println("\nHold up a white object in front of the sensor, then press any key to calibrate...\n");
-  
-  while(!Serial.available())
-    ;  // Wait till a key is pressed
-  Serial.flush();
-  
-  Serial.println("\nCalibrating...this may take a moment\n");
-  calibrateColor();  // This calibrates R, G, and B int registers
-  calibrateClear();  // This calibrates the C int registers
-  calibrateCapacitors();  // This calibrates the RGB, and C cap registers
-  getRGBC();  // After calibrating, we can get the first RGB and C data readings
-  printADJD_S311Values();  // Formats and prints all important ADJD-S311 registers
-  
-  Serial.println("\nAll values should be under 1000. If they're not, try calibrating again, or decreasing the ambient brightness somehow. ");
-  Serial.println("\nPress SPACE to read, \"c\" to calibrate, \"o\" to get offset, \"l\" to go to LED mode");
-  
-  
-  
 
+
+// Initialise the GPS System
   
   // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
   GPS.begin(9600);
@@ -201,73 +180,11 @@ void useInterrupt(boolean v) {
 }
 
 uint32_t timer = millis();
+
+
 void loop()                     // run over and over again
 {
-  
-  while(!Serial.available())
-    ;  // Wait till something's pressed
-  char inKey = Serial.read();
-  
-  if (inKey == ' ')
-  {  // If SPACE is pressed, get one reading and print it
-    getRGBC();
-    printADJD_S311Values();
-  }
-  else if (inKey == 'c')
-  {  // If c is pressed, calibrate int and cap registers, then get a reading and print it
-    Serial.println("\nCalibrating...\n");
-    calibrateColor();
-    calibrateClear();
-    calibrateCapacitors();
-    getRGBC();
-    printADJD_S311Values();
-  }
-  else if (inKey == 'o')
-  {  // if o is pressed, get the offset values
-    getOffset();
-    Serial.print("Offset: \t ");
-    for (int i=0; i<4; i++)
-    {
-      Serial.print(colorOffset[i], DEC);
-      Serial.print("\t ");
-    }
-    Serial.println();
-  }
-  else if (inKey == 'l')
-  {  // if l is pressed, output color readings to an RGB LED
-     // We'll assume the sensor is calibrated
-    Serial.println("\nReplicating color on RGB LED, press any key to stop...\n");
-    Serial.println("\t Red \t Green \t Blue");
-    int averageData[3] = {0, 0, 0};  // We'll averaged the data
-    while(!Serial.available())
-    {  // Run continuously, until a key is pressed
-      for (int i=0; i<4; i++)
-      {  // Average the data four times
-        getRGBC();  // Get data values
-        for (int j=0; j<3; j++)
-          averageData[i] += colorData[i];
-      }
-      for (int i=0; i<3; i++)
-        averageData[i] /= 4;  // data averaging
-        
-      for (int i=0; i<3; i++)
-      {  // print out the data, and send it to the RGB LED
-        Serial.print("\t");
-        Serial.print(averageData[i], DEC);
-      }
-      Serial.println();
-    }
-  }
-  else
-    Serial.println("\nPress SPACE to read, \"c\" to calibrate, \"o\" to get offset, \"l\" to go to LED mode");
-  Serial.flush();
-  
-  
-  
-  
-  
-  
-  
+    
   // in case you are not using the interrupt above, you'll
   // need to 'hand query' the GPS, not suggested :(
   if (! usingInterrupt) {
@@ -332,6 +249,7 @@ void loop()                     // run over and over again
     Serial.println(" meters");  
     
     if (GPS.fix) {
+	  Serial.print("GPS FIX: OK");
       Serial.print("Location: ");
       Serial.print(GPS.latitude, 4); Serial.print(GPS.lat);
       Serial.print(", "); 
@@ -341,8 +259,14 @@ void loop()                     // run over and over again
       Serial.print("Angle: "); Serial.println(GPS.angle);
       Serial.print("GPS Altitude: "); Serial.println(GPS.altitude);
       Serial.print("Satellites: "); Serial.println((int)GPS.satellites);
-    }
+    } else {
+	
+		Serial.print("GPS FIX: FAIL");
+	}
     
+
+    getRGBC();
+    printADJD_S311Values();
    
   }
 }
