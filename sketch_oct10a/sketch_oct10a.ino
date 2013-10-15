@@ -7,6 +7,8 @@
 #include <Adafruit_GPS.h>
 #include <Adafruit_BMP085.h>
 #include <Adafruit_Sensor.h>
+#include <RTClib.h>
+#include <SD.h>
 
 
 
@@ -29,62 +31,26 @@ void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
 //////
 
 
+////// Three-Axis Sensor
 
-
-
-
-
-////// COLOR SENSOR SYSTEM
-// Initialize the Color Sensor
-// ADJD-S311's I2C address, don't change
-#define ADJD_S311_ADDRESS 0x74
-
-#define RED 0
-#define GREEN 1
-#define BLUE 2
-#define CLEAR 3
-
-// ADJD-S311's register list
-#define CTRL 0x00
-#define CONFIG 0x01
-#define CAP_RED 0x06
-#define CAP_GREEN 0x07
-#define CAP_BLUE 0x08
-#define CAP_CLEAR 0x09
-#define INT_RED_LO 0xA
-#define INT_RED_HI 0xB
-#define INT_GREEN_LO 0xC
-#define INT_GREEN_HI 0xD
-#define INT_BLUE_LO 0xE
-#define INT_BLUE_HI 0xF
-#define INT_CLEAR_LO 0x10
-#define INT_CLEAR_HI 0x11
-#define DATA_RED_LO 0x40
-#define DATA_RED_HI 0x41
-#define DATA_GREEN_LO 0x42
-#define DATA_GREEN_HI 0x43
-#define DATA_BLUE_LO 0x44
-#define DATA_BLUE_HI 0x45
-#define DATA_CLEAR_LO 0x46
-#define DATA_CLEAR_HI 0x47
-#define OFFSET_RED 0x48
-#define OFFSET_GREEN 0x49
-#define OFFSET_BLUE 0x4A
-#define OFFSET_CLEAR 0x4B
-
-// Pin definitions:
-int sdaPin = A4;  // serial data, hardwired, can't change
-int sclPin = A5;  // serial clock, hardwired, can't change
-int ledPin = 4;  // LED light source pin, any unused pin will work
-
-unsigned char colorCap[4] = {9, 9, 2, 5};  // values must be between 0 and 15
-unsigned int colorInt[4] = {2048, 2048, 2048, 2048};  // max value for these is 4095
-unsigned int colorData[4];  // This is where we store the RGB and C data values
-signed char colorOffset[4];  // Stores RGB and C offset values
-
-//////
-
-
+const int xInput = A0;
+const int yInput = A1;
+const int zInput = A2;
+ 
+// Raw Ranges:
+// initialize to mid-range and allow calibration to
+// find the minimum and maximum for each axis
+int xRawMin = 512;
+int xRawMax = 512;
+ 
+int yRawMin = 512;
+int yRawMax = 512;
+ 
+int zRawMin = 512;
+int zRawMax = 512;
+ 
+// Take multiple samples to reduce noise
+const int sampleSize = 10;
 
 
 
@@ -93,30 +59,37 @@ signed char colorOffset[4];  // Stores RGB and C offset values
 // Initialize the Barometer Sensor
 Adafruit_BMP085 bmp;
 
+
+////// Data logging shield
+// Start up the Real Time Clock
+
+RTC_DS1307 RTC;
+
+// for the data logging shield, we use digital pin 10 for the SD cs line
+const int chipSelect = 10;
+ 
+// the logging file
+File logfile;
+
+
+
+
+
+
+
  
 
 
 
 void setup()  
 {
-  
+
+analogReference(EXTERNAL);  
 Wire.begin();
 Serial.begin(115200);
+RTC.begin();
 
-delay(1);  // Wait for ADJD reset sequence on the Color Sensor, Give time to the other boards
-
-
-
-// For the color sensor
-pinMode(ledPin, OUTPUT);  // Set the sensor's LED as output
-digitalWrite(ledPin, LOW);  // Initially turn LED light source on
-
-
-
-
-
-
-
+delay(2000);  // Give time to the other boards
 
 ////// First we test the systems
 
@@ -124,19 +97,12 @@ digitalWrite(ledPin, LOW);  // Initially turn LED light source on
 if(!bmp.begin())
   {
     /* There was a problem detecting the BMP085 ... check your connections */
-    Serial.print("Atmospheric Sensor System: FAIL");
+    Serial.println("Atmospheric Sensor System: FAIL");
     while(1);
   }  else {
-	Serial.print("Atmospheric Sensor System: OK");
+	Serial.println("Atmospheric Sensor System: OK");
   }
-  
-
-// Initialise the Color System
-
-
-  initADJD_S311();  // Initialize the ADJD-S311, sets up cap and int registers
-  
-
+ 
 
 // Initialise the GPS System
   
@@ -149,7 +115,71 @@ if(!bmp.begin())
   // Request updates on antenna status, comment out to keep quiet
   GPS.sendCommand(PGCMD_ANTENNA);
   useInterrupt(true);
-  delay(1000);
+  Serial.println("GPS System: MESSAGE TO BE IMPLEMENTED HERE");
+  Serial.print(GPS.hour, DEC); Serial.print(':');
+  Serial.print(GPS.minute, DEC); Serial.print(':');
+  Serial.print(GPS.seconds, DEC); Serial.print('.');
+  Serial.println(GPS.milliseconds);
+  Serial.print("Date: ");
+  Serial.print(GPS.day, DEC); Serial.print('/');
+  Serial.print(GPS.month, DEC); Serial.print("/20");
+  Serial.println(GPS.year, DEC);
+
+// Initialise the Real Time Clock on the Data Logger, and check it against the GPS
+
+if (RTC.isrunning()) {
+    Serial.println("Data Logging Shield Real Time Clock: OK");
+    
+    DateTime now = RTC.now();
+    Serial.print("RTC Time Now:");
+    Serial.print(now.year(), DEC);
+    Serial.print('/');
+    Serial.print(now.month(), DEC);
+    Serial.print('/');
+    Serial.print(now.day(), DEC);
+    Serial.print(' ');
+    Serial.print(now.hour(), DEC);
+    Serial.print(':');
+    Serial.print(now.minute(), DEC);
+    Serial.print(':');
+    Serial.print(now.second(), DEC);
+    Serial.println();
+   
+  } else {
+    Serial.println("Data Logging Shield Real Time Clock: FAIL");
+  }
+
+// initialize the SD card
+  Serial.println("Initializing SD card...");
+  // make sure that the default chip select pin is set to
+  // output, even if you don't use it:
+  pinMode(10, OUTPUT);
+  
+  // see if the card is present and can be initialized:
+  if (!SD.begin(chipSelect)) {
+    Serial.println("Card failed, or not present");
+    // don't do anything more:
+    return;
+  }
+  Serial.println("card initialized.");
+  
+  // create a new file
+  char filename[] = "LOGGER00.CSV";
+  for (uint8_t i = 0; i < 100; i++) {
+    filename[6] = i/10 + '0';
+    filename[7] = i%10 + '0';
+    if (! SD.exists(filename)) {
+      // only open a new file if it doesn't exist
+      logfile = SD.open(filename, FILE_WRITE); 
+      break;  // leave the loop!
+    }
+  }
+  
+  if (! logfile) {Serial.println("couldnt create file");}
+  
+  Serial.print("Logging to: ");
+  Serial.println(filename);
+
 }
 
 
@@ -249,7 +279,7 @@ void loop()                     // run over and over again
     Serial.println(" meters");  
     
     if (GPS.fix) {
-	  Serial.print("GPS FIX: OK");
+	  Serial.println("GPS FIX: OK");
       Serial.print("Location: ");
       Serial.print(GPS.latitude, 4); Serial.print(GPS.lat);
       Serial.print(", "); 
@@ -261,331 +291,89 @@ void loop()                     // run over and over again
       Serial.print("Satellites: "); Serial.println((int)GPS.satellites);
     } else {
 	
-		Serial.print("GPS FIX: FAIL");
+		Serial.println("GPS FIX: FAIL");
 	}
-    
+  
+  
+  // Three Axis Sensor Raw Values
+   
+  int xRaw = ReadAxis(xInput);
+  int yRaw = ReadAxis(yInput);
+  int zRaw = ReadAxis(zInput);
+  
+   AutoCalibrate(xRaw, yRaw, zRaw);
 
-    getRGBC();
-    printADJD_S311Values();
+    Serial.println();
+    Serial.print(xRaw);
+    Serial.print(", ");
+    Serial.print(yRaw);
+    Serial.print(", ");
+    Serial.print(zRaw);
+    
+    // Convert raw values to 'milli-Gs"
+    long xScaled = map(xRaw, xRawMin, xRawMax, -1000, 1000);
+    long yScaled = map(yRaw, yRawMin, yRawMax, -1000, 1000);
+    long zScaled = map(zRaw, zRawMin, zRawMax, -1000, 1000);
+  
+    // re-scale to fractional Gs
+    float xAccel = xScaled / 1000.0;
+    float yAccel = yScaled / 1000.0;
+    float zAccel = zScaled / 1000.0;
+  
+    Serial.print(" :: ");
+    Serial.print(xAccel);
+    Serial.print("G, ");
+    Serial.print(yAccel);
+    Serial.print("G, ");
+    Serial.print(zAccel);
+    Serial.println("G");
+   
+   
    
   }
 }
 
 
-
-
-
-
-
-/* printADJD_S311Values() reads, formats, and prints all important registers
-of the ADJD-S311. 
-It doesn't perform any measurements, so you'll need to call getRGBC() to print
-new values.
-*/
-void printADJD_S311Values()
+int ReadAxis(int axisPin)
 {
-  Serial.println("\t\t Red \t Green \t Blue \t Clear");
-  Serial.print("Data: \t\t ");
-  for (int i=0; i<4; i++)
+  long reading = 0;
+  analogRead(axisPin);
+  delay(1);
+  for (int i = 0; i < sampleSize; i++)
   {
-    Serial.print(colorData[i]);
-    Serial.print("\t ");
+    reading += analogRead(axisPin);
   }
-  Serial.println();
-  Serial.print("Caps: \t\t ");
-  for (int i=0; i<4; i++)
-  {
-    Serial.print(readRegister(CAP_RED+i), DEC);
-    Serial.print("\t ");
-  }
-  Serial.println();
-  Serial.print("Int: \t\t ");
-  for (int i=0; i<4; i++)
-  {
-    Serial.print(readRegisterInt(INT_RED_LO+(i*2)), DEC);
-    Serial.print("\t ");
-  }
-  Serial.println();
-  Serial.print("Offset: \t ");
-  for (int i=0; i<4; i++)
-  {
-    Serial.print((signed char) readRegister(OFFSET_RED+i), DEC);
-    Serial.print("\t ");
-  }
-  Serial.println();
+  return reading/sampleSize;
 }
 
 
-
-
-/* initADJD_S311() - This function initializes the ADJD-S311 and its
-capacitor and integration registers 
-The vaules for those registers are defined near the top of the code.
-the colorCap[] array defines all capacitor values, colorInt[] defines
-all integration values.
-*/
-void initADJD_S311()
-{ 
-  /*sensor gain registers, CAP_...
-  to select number of capacitors.
-  value must be <= 15 */
-  writeRegister(colorCap[RED] & 0xF, CAP_RED);
-  writeRegister(colorCap[GREEN] & 0xF, CAP_GREEN);
-  writeRegister(colorCap[BLUE] & 0xF, CAP_BLUE);
-  writeRegister(colorCap[CLEAR] & 0xF, CAP_CLEAR);
-
-  /* Write sensor gain registers INT_...
-  to select integration time 
-  value must be <= 4096 */
-  writeRegister((unsigned char)colorInt[RED], INT_RED_LO);
-  writeRegister((unsigned char)((colorInt[RED] & 0x1FFF) >> 8), INT_RED_HI);
-  writeRegister((unsigned char)colorInt[BLUE], INT_BLUE_LO);
-  writeRegister((unsigned char)((colorInt[BLUE] & 0x1FFF) >> 8), INT_BLUE_HI);
-  writeRegister((unsigned char)colorInt[GREEN], INT_GREEN_LO);
-  writeRegister((unsigned char)((colorInt[GREEN] & 0x1FFF) >> 8), INT_GREEN_HI);
-  writeRegister((unsigned char)colorInt[CLEAR], INT_CLEAR_LO);
-  writeRegister((unsigned char)((colorInt[CLEAR] & 0x1FFF) >> 8), INT_CLEAR_HI);
-}
-
-/* calibrateClear() - This function calibrates the clear integration registers
-of the ADJD-S311.
-*/
-int calibrateClear()
+void AutoCalibrate(int xRaw, int yRaw, int zRaw)
 {
-  int gainFound = 0;
-  int upperBox=4096;
-  int lowerBox = 0;
-  int half;
-  
-  while (!gainFound)
+  Serial.println("Calibrate");
+  if (xRaw < xRawMin)
   {
-    half = ((upperBox-lowerBox)/2)+lowerBox;
-    //no further halfing possbile
-    if (half==lowerBox)
-      gainFound=1;
-    else 
-    {
-      writeInt(INT_CLEAR_LO, half);
-      performMeasurement();
-      int halfValue = readRegisterInt(DATA_CLEAR_LO);
-
-      if (halfValue>1000)
-        upperBox=half;
-      else if (halfValue<1000)
-        lowerBox=half;
-      else
-        gainFound=1;
-    }
+    xRawMin = xRaw;
   }
-  return half;
-}
-
-/* calibrateColor() - This function clalibrates the RG and B 
-integration registers.
-*/
-int calibrateColor()
-{
-  int gainFound = 0;
-  int upperBox=4096;
-  int lowerBox = 0;
-  int half;
-  
-  while (!gainFound)
+  if (xRaw > xRawMax)
   {
-    half = ((upperBox-lowerBox)/2)+lowerBox;
-    //no further halfing possbile
-    if (half==lowerBox)
-    {
-      gainFound=1;
-    }
-    else {
-      writeInt(INT_RED_LO, half);
-      writeInt(INT_GREEN_LO, half);
-      writeInt(INT_BLUE_LO, half);
-
-      performMeasurement();
-      int halfValue = 0;
-
-      halfValue=max(halfValue, readRegisterInt(DATA_RED_LO));
-      halfValue=max(halfValue, readRegisterInt(DATA_GREEN_LO));
-      halfValue=max(halfValue, readRegisterInt(DATA_BLUE_LO));
-
-      if (halfValue>1000) {
-        upperBox=half;
-      }
-      else if (halfValue<1000) {
-        lowerBox=half;
-      }
-      else {
-        gainFound=1;
-      }
-    }
-  }
-  return half;
-}
-
-/* calibrateCapacitors() - This function calibrates each of the RGB and C
-capacitor registers.
-*/
-void calibrateCapacitors()
-{
-  int  calibrationRed = 0;
-  int  calibrationBlue = 0;
-  int  calibrationGreen = 0;
-  int calibrated = 0;
-
-  //need to store detect better calibration
-  int oldDiff = 5000;
-
-  while (!calibrated)
-  {
-    // sensor gain setting (Avago app note 5330)
-    // CAPs are 4bit (higher value will result in lower output)
-    writeRegister(calibrationRed, CAP_RED);
-    writeRegister(calibrationGreen, CAP_GREEN);
-    writeRegister(calibrationBlue, CAP_BLUE);
-
-    // int colorGain = _calibrateColorGain();
-    int colorGain = readRegisterInt(INT_RED_LO);
-    writeInt(INT_RED_LO, colorGain);
-    writeInt(INT_GREEN_LO, colorGain);
-    writeInt(INT_BLUE_LO, colorGain);
-
-    int maxRead = 0;
-    int minRead = 4096;
-    int red   = 0;
-    int green = 0;
-    int blue  = 0;
-    
-    for (int i=0; i<4 ;i ++)
-    {
-      performMeasurement();
-      red   += readRegisterInt(DATA_RED_LO);
-      green += readRegisterInt(DATA_GREEN_LO);
-      blue  += readRegisterInt(DATA_BLUE_LO);
-    }
-    red   /= 4;
-    green /= 4;
-    blue  /= 4;
-
-    maxRead = max(maxRead, red);
-    maxRead = max(maxRead, green);
-    maxRead = max(maxRead, blue);
-
-    minRead = min(minRead, red);
-    minRead = min(minRead, green);
-    minRead = min(minRead, blue);
-
-    int diff = maxRead - minRead;
-
-    if (oldDiff != diff)
-    {
-      if ((maxRead==red) && (calibrationRed<15))
-        calibrationRed++;
-      else if ((maxRead == green) && (calibrationGreen<15))
-        calibrationGreen++;
-      else if ((maxRead == blue) && (calibrationBlue<15))
-        calibrationBlue++;
-    }
-    else
-      calibrated = 1;
-      
-    oldDiff=diff;
-
-    int rCal = calibrationRed;
-    int gCal = calibrationGreen;
-    int bCal = calibrationBlue;
+    xRawMax = xRaw;
   }
   
-}
-
-/* writeInt() - This function writes a 12-bit value
-to the LO and HI integration registers */
-void writeInt(int address, int gain)
-{
-  if (gain < 4096) 
+  if (yRaw < yRawMin)
   {
-    byte msb = gain >> 8;
-    byte lsb = gain;
-
-    writeRegister(lsb, address);
-    writeRegister(msb, address+1);
+    yRawMin = yRaw;
+  }
+  if (yRaw > yRawMax)
+  {
+    yRawMax = yRaw;
+  }
+ 
+  if (zRaw < zRawMin)
+  {
+    zRawMin = zRaw;
+  }
+  if (zRaw > zRawMax)
+  {
+    zRawMax = zRaw;
   }
 }
-
-/* performMeasurement() - This must be called before
-reading any of the data registers. This commands the
-ADJD-S311 to perform a measurement, and store the data
-into the data registers.*/
-void performMeasurement()
-{  
-  writeRegister(0x01, 0x00); // start sensing
-  while(readRegister(0x00) != 0)
-    ; // waiting for a result
-}
-
-/* getRGBC() - This function reads all of the ADJD-S311's
-data registers and stores them into colorData[]. To get the
-most up-to-date data make sure you call performMeasurement() 
-before calling this function.*/
-void getRGBC()
-{
-  performMeasurement();
-  
-  colorData[RED] = readRegisterInt(DATA_RED_LO);
-  colorData[GREEN] = readRegisterInt(DATA_GREEN_LO);
-  colorData[BLUE] = readRegisterInt(DATA_BLUE_LO);
-  colorData[CLEAR] = readRegisterInt(DATA_CLEAR_LO);
-}
-
-/* getOffset() - This function performs the offset reading
-and stores the offset data into the colorOffset[] array.
-You can turn on data trimming by uncommenting out the 
-writing 0x01 to 0x01 code.
-*/
-void getOffset()
-{
-  digitalWrite(ledPin, LOW);  // turn LED off
-  delay(10);  // wait a tic
-  writeRegister(0x02, 0x00); // start sensing
-  while(readRegister(0x00) != 0)
-    ; // waiting for a result
-  //writeRegister(0x01, 0x01);  // set trim
-  //delay(100);
-  for (int i=0; i<4; i++)
-    colorOffset[i] = (signed char) readRegister(OFFSET_RED+i);
-  digitalWrite(ledPin, HIGH);
-}
-
-/* I2C functions...*/
-// Write a byte of data to a specific ADJD-S311 address
-void writeRegister(unsigned char data, unsigned char address)
-{
-  Wire.beginTransmission(ADJD_S311_ADDRESS);
-  Wire.write(address);
-  Wire.write(data);
-  Wire.endTransmission();
-}
-
-// read a byte of data from ADJD-S311 address
-unsigned char readRegister(unsigned char address)
-{
-  unsigned char data;
-  
-  Wire.beginTransmission(ADJD_S311_ADDRESS);
-  Wire.write(address);
-  Wire.endTransmission();
-  
-  Wire.requestFrom(ADJD_S311_ADDRESS, 1);
-  while (!Wire.available())
-    ;  // wait till we can get data
-  
-  return Wire.read();
-}
-
-// Write two bytes of data to ADJD-S311 address and addres+1
-int readRegisterInt(unsigned char address)
-{
-  return readRegister(address) + (readRegister(address+1)<<8);
-}
-
