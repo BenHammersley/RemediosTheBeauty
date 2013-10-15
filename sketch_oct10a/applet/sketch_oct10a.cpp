@@ -1,4 +1,8 @@
+#include "Arduino.h"
+void setup();
+void loop();
 // Remedios The Beauty
+
 
 // Load the necessary libraries
 #include <Wire.h>
@@ -15,30 +19,49 @@
 //////// Initialise the subsystems
 
 ////// GPS SYSTEM
+
 // Assign the GPS chip its tx and rx pins. (tx,rx)
 SoftwareSerial gpsSerial(3, 2);
 Adafruit_GPS GPS(&gpsSerial);
+// Set GPSECHO to 'false' to turn off echoing the GPS data to the Serial console
+// Set to 'true' if you want to debug and listen to the raw GPS sentences. 
 #define GPSECHO  false
 // this keeps track of whether we're using the interrupt
 // off by default!
 boolean usingInterrupt = false;
 void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
 
+//////
+
+
 ////// Three-Axis Sensor
+
 const int xInput = A0;
 const int yInput = A1;
 const int zInput = A2;
+ 
+// Raw Ranges:
+// initialize to mid-range and allow calibration to
+// find the minimum and maximum for each axis
 int xRawMin = 512;
-int xRawMax = 512; 
+int xRawMax = 512;
+ 
 int yRawMin = 512;
 int yRawMax = 512;
+ 
 int zRawMin = 512;
 int zRawMax = 512;
+ 
+// Take multiple samples to reduce noise
 const int sampleSize = 10;
+
+
+
 
 ////// ATMOSPHERIC SENSOR SYSTEM
 // Initialize the Barometer Sensor
 Adafruit_BMP085 bmp;
+
 
 ////// Data logging shield
 // Start up the Real Time Clock
@@ -52,6 +75,12 @@ const int chipSelect = 10;
 File logfile;
 
 
+
+
+
+
+
+ 
 
 
 
@@ -167,9 +196,6 @@ SIGNAL(TIMER0_COMPA_vect) {
     // writing direct to UDR0 is much much faster than Serial.print 
     // but only one character can be written at a time. 
 #endif
-}
-
-
 }
 
 void useInterrupt(boolean v) {
@@ -310,6 +336,7 @@ void loop()                     // run over and over again
   }
 }
 
+
 int ReadAxis(int axisPin)
 {
   long reading = 0;
@@ -321,6 +348,7 @@ int ReadAxis(int axisPin)
   }
   return reading/sampleSize;
 }
+
 
 void AutoCalibrate(int xRaw, int yRaw, int zRaw)
 {
